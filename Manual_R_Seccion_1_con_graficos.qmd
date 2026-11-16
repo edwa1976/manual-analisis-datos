@@ -1,0 +1,356 @@
+---
+title: "Manual de análisis de datos con R y RStudio"
+subtitle: "Sección 1. Primera práctica: generar, preparar y analizar datos en R"
+lang: es
+bibliography: referencias.bib
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-title: "Contenido"
+    code-copy: true
+    code-fold: false
+    df-print: paged
+    embed-resources: true
+execute:
+  echo: true
+  message: false
+  warning: true
+  cache: false
+editor: source
+---
+
+# 1. Primera práctica: generación y análisis de datos sintéticos en R
+
+**¿Qué vamos a hacer?** Crearemos una tabla ficticia de 50.000 pedidos y utilizaremos R para convertir sus datos a formatos adecuados, obtener un resumen mensual y comparar los resultados entre meses. Las ventas son un ejemplo de práctica; **el objetivo es aprender a trabajar con datos en R**, no estudiar gestión comercial.
+
+Al terminar esta sección podrás reconocer una tabla de R, transformar columnas de texto, agrupar registros y calcular una variación porcentual. El trabajo tendrá esta secuencia:
+
+**Crear la tabla → revisar su estructura → preparar las variables → resumir por mes → comparar los meses.**
+
+## 1.1 Instalación y carga de paquetes
+
+Los *paquetes* agregan funciones a R. Solo necesitas **instalarlos una vez** en el equipo; luego debes **cargarlos al comenzar la sesión** en la que los utilizarás.
+
+Si todavía no tienes los paquetes, ejecuta este código **una sola vez en la consola de RStudio**. El bloque está desactivado para que Quarto no intente reinstalarlos al generar el manual.
+
+```{r}
+#| label: instalar-paquetes
+#| eval: false
+
+install.packages(c("tidyverse", "lubridate", "janitor", "conflicted"))
+```
+
+Para esta práctica utilizaremos `tidyverse` para crear y transformar tablas, `lubridate` para manejar fechas y `janitor` para estandarizar nombres de columnas. `conflicted` permite aclarar qué función debe usarse si varios paquetes ofrecen funciones con el mismo nombre.
+
+```{r}
+#| label: cargar-paquetes
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(conflicted)
+
+conflicts_prefer(dplyr::filter, dplyr::lag)
+```
+
+## 1.2 Crear nuestro conjunto de datos
+
+**Propósito del código:** generar una tabla llamada `datos_ventas` que podamos usar sin archivos externos ni información real. Tendrá **50.000 filas (pedidos)** y **12 columnas (variables)**. Algunas columnas, como los montos y las fechas, se crearán deliberadamente como texto para practicar su conversión.
+
+Las variables son: `id_pedido`, `fecha_pedido`, `region`, `monto_venta`, `tipo_cliente`, `categoria_producto`, `cantidad`, `porcentaje_descuento`, `costo_envio`, `metodo_pago`, `id_vendedor` y `estado_pedido`.
+
+```{r}
+#| label: crear-datos-ventas
+
+set.seed(123)                  # Permite reproducir la simulación
+n_registros <- 50000           # Número de filas deseado
+
+fechas_simuladas <- seq.Date(
+  from = as.Date("2025-01-01"),
+  to   = as.Date("2026-12-31"),
+  by   = "day"
+)
+
+datos_ventas <- tibble(
+  id_pedido = sprintf("ORD-%06d", seq_len(n_registros)),
+  fecha_pedido = as.character(sample(fechas_simuladas, n_registros, replace = TRUE)),
+  region = sample(c("Norte", "Sur", "Centro", "Oriente", "Occidente"),
+                  n_registros, replace = TRUE),
+  monto_venta = paste0("$", format(round(runif(n_registros, 50, 5000), 2),
+                                    nsmall = 2, big.mark = ",", trim = TRUE)),
+  tipo_cliente = sample(c("Corporativo", "Individual", "Pyme", "Gobierno"),
+                        n_registros, replace = TRUE),
+  categoria_producto = sample(c("Tecnología", "Insumos", "Servicios", "Equipos"),
+                              n_registros, replace = TRUE),
+  cantidad = sample(1:20, n_registros, replace = TRUE),
+  porcentaje_descuento = paste0(sample(c(0, 5, 10, 15, 20),
+                                       n_registros, replace = TRUE), "%"),
+  costo_envio = paste0("$", format(round(runif(n_registros, 5, 150), 2),
+                                   nsmall = 2, trim = TRUE)),
+  metodo_pago = sample(c("Tarjeta de Crédito", "Transferencia", "Factura 30 días"),
+                       n_registros, replace = TRUE),
+  id_vendedor = paste0("REP-", sample(100:150, n_registros, replace = TRUE)),
+  estado_pedido = sample(c("Completado", "Enviado", "Procesando"),
+                         n_registros, replace = TRUE,
+                         prob = c(0.80, 0.15, 0.05))
+)
+```
+
+**¿Qué significan las principales instrucciones?**
+
+| Función o argumento | ¿Para qué lo usamos aquí? |
+|:--|:--|
+| `set.seed(123)` | Permite repetir esta simulación con la misma secuencia de números aleatorios. |
+| `tibble()` | Reúne las 12 variables en una tabla. |
+| `seq.Date()` | Crea las fechas posibles entre 2025 y 2026. |
+| `sample(..., replace = TRUE)` | Selecciona valores al azar y permite repetir categorías. |
+| `prob = c(0.80, 0.15, 0.05)` | Da mayor probabilidad al estado "Completado" (80 %) que a "Enviado" (15 %) o "Procesando" (5 %). **No fija cantidades exactas.** |
+| `runif()` | Genera montos numéricos aleatorios dentro de un intervalo. |
+| `round()` y `format()` | Redondean y presentan cantidades con dos decimales. |
+| `paste0()` | Une fragmentos de texto, como el símbolo `$` y un monto. |
+| `as.character()` | Convierte las fechas seleccionadas en texto para practicar la limpieza. |
+| `sprintf()` | Crea identificadores únicos con ceros a la izquierda. |
+
+::: callout-note
+## Sobre los datos simulados
+
+En la tabla, **cada fila representa un pedido distinto** y su identificador es único. La mayoría de las variables se generan independientemente: el monto de venta no se calcula a partir de la cantidad ni del descuento. El estado "Completado" indica un pedido finalizado para esta práctica, no necesariamente cobrado.
+:::
+
+## 1.3 Revisar la tabla que acabamos de crear
+
+**Propósito:** comprobar que el objeto existe, que tiene el tamaño esperado y qué tipo de dato posee cada columna. Antes de modificar una base conviene conocer su estructura.
+
+```{r}
+#| label: explorar-datos
+
+# Dimensiones: número de filas y de columnas
+dim(datos_ventas)
+
+# Primeros seis registros
+head(datos_ventas)
+
+# Nombres y tipos de las variables
+glimpse(datos_ventas)
+```
+
+**¿Qué debes observar?** `dim()` debe indicar **50000 filas y 12 columnas**. En `glimpse()`, `fecha_pedido` y `monto_venta` figuran como texto (`chr`); eso explica por qué necesitamos prepararlas antes de agrupar y calcular.
+
+## 1.4 Preparar las variables para analizarlas
+
+**Propósito:** convertir el monto de venta en un número, transformar la fecha de texto a fecha de R y crear una variable que identifique el mes de cada pedido. Guardaremos el resultado en otra tabla, `datos_limpios`, para conservar intactos los datos originales.
+
+```{r}
+#| label: preparar-variables
+
+datos_limpios <- datos_ventas |>
+  clean_names() |>
+  mutate(
+    monto_venta_numerico = parse_number(monto_venta),
+    fecha_pedido_convertida = ymd(fecha_pedido),
+    mes = floor_date(fecha_pedido_convertida, unit = "month")
+  )
+
+# Comparar las columnas originales y las transformadas
+head(datos_limpios |>
+       select(monto_venta, monto_venta_numerico,
+              fecha_pedido, fecha_pedido_convertida, mes))
+```
+
+El operador `|>` se lee como **«tomar el resultado anterior y pasarlo a la siguiente función»**. `mutate()` crea columnas o modifica las existentes; `parse_number()` interpreta textos como `"$1,200.50"` y extrae el número `1200.50`; `ymd()` convierte una fecha escrita como `"2025-03-15"` al tipo `Date`; `floor_date(..., "month")` la lleva al primer día de su mes, para poder agrupar pedidos del mismo período.
+
+::: callout-important
+## ¿Ya está completamente limpia la base?
+
+Todavía no. En este primer ejercicio **solo preparamos los tipos de datos necesarios** para el cálculo. En las secciones posteriores del manual estudiaremos controles de calidad más completos.
+:::
+
+## 1.5 Obtener un resumen mensual por región
+
+**Propósito:** pasar de miles de pedidos individuales a una tabla más pequeña. Para practicar `filter()`, `group_by()` y `summarise()`, usaremos únicamente los pedidos cuyo estado sea `"Completado"` y calcularemos, por mes y región, la suma de sus montos y la cantidad de pedidos.
+
+```{r}
+#| label: resumir-ventas-mensuales
+
+ventas_mensuales <- datos_limpios |>
+  filter(estado_pedido == "Completado") |>
+  group_by(mes, region) |>
+  summarise(
+    monto_total = sum(monto_venta_numerico, na.rm = TRUE),
+    total_pedidos = n_distinct(id_pedido),
+    .groups = "drop"
+  )
+
+head(ventas_mensuales)
+```
+
+En este bloque, `filter()` selecciona las filas que cumplen una condición, `group_by()` reúne las que pertenecen al mismo mes y región, y `summarise()` calcula un resultado por grupo. `sum()` obtiene el monto total y `n_distinct()` cuenta los identificadores diferentes. `.groups = "drop"` deja el resultado sin agrupaciones activas.
+
+**Cómo leer el resultado:** cada fila de `ventas_mensuales` representa **un mes y una región**, no un pedido. `monto_total` es la suma de los importes simulados de pedidos completados; no representa pagos recibidos ni utilidad.
+
+## 1.6 Calcular el crecimiento mes a mes (MoM %)
+
+**Propósito:** aprender a comparar una cantidad con la del período anterior mediante `lag()` y `mutate()`. El crecimiento mes a mes (MoM) es una variación porcentual entre dos meses consecutivos [@startupeable_mom].
+
+$$
+\text{MoM (\%)}=\frac{\text{Monto del mes actual}-\text{Monto del mes anterior}}{\text{Monto del mes anterior}}\times100
+$$
+
+```{r}
+#| label: calcular-crecimiento-mensual
+
+analisis_crecimiento_mensual <- ventas_mensuales |>
+  arrange(region, mes) |>
+  group_by(region) |>
+  mutate(
+    monto_mes_anterior = lag(monto_total),
+    crecimiento_mensual_pct = if_else(
+      is.na(monto_mes_anterior) | monto_mes_anterior == 0,
+      NA_real_,
+      round(100 * (monto_total - monto_mes_anterior) /
+              monto_mes_anterior, 2)
+    )
+  ) |>
+  ungroup()
+
+print(analisis_crecimiento_mensual, n = 12)
+```
+
+`arrange()` ordena cronológicamente los registros de cada región, `group_by(region)` garantiza que la comparación ocurra **dentro de la misma región** y `lag()` recupera el monto del mes previo. `if_else()` deja `NA` cuando no existe un mes anterior o no es posible dividir entre cero.
+
+**Interpretación:** un valor positivo indica que el monto aumentó frente al mes previo; uno negativo indica que disminuyó. El primer mes de cada región aparece con `NA` porque no hay un mes anterior en esta tabla. La variación no demuestra por sí sola por qué cambió el monto.
+
+## 1.7 Representar los resultados mediante gráficos
+
+**Propósito:** aprender a pasar de una tabla a una representación visual con `ggplot2`, un paquete que ya cargamos mediante `tidyverse` en la sección 1.1. Los gráficos permiten comparar categorías, observar cómo cambian los valores a lo largo del tiempo y reconocer aumentos o disminuciones. Utilizaremos únicamente los datos calculados en los apartados anteriores.
+
+### Gráfico 1. ¿Cuántos pedidos hay en cada estado?
+
+Antes de trabajar con los resúmenes mensuales, examinaremos los 50.000 pedidos originales. Un gráfico de barras es adecuado porque `estado_pedido` es una variable **categórica**, es decir, sus valores son nombres de grupos.
+
+```{r}
+#| label: grafico-estados-pedido
+#| fig-width: 8
+#| fig-height: 4.5
+
+# ggplot() indica la tabla y la variable que queremos representar.
+# geom_bar() cuenta automáticamente los registros de cada categoría.
+ggplot(datos_ventas, aes(x = estado_pedido)) +
+  geom_bar(fill = "#397B91") +
+  labs(
+    title = "Número de pedidos según su estado",
+    subtitle = "Base simulada de 50.000 pedidos",
+    x = "Estado del pedido",
+    y = "Cantidad de pedidos",
+    caption = "Fuente: datos sintéticos generados en R"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+**¿Cómo se interpreta?** Cada barra muestra la cantidad de pedidos de un estado. Es esperable que «Completado» tenga la barra más alta porque, al generar los datos, le asignamos una probabilidad de 80 %. La distribución observada puede aproximarse a las probabilidades definidas sin coincidir exactamente con ellas.
+
+### Gráfico 2. ¿Cómo varía el monto mensual entre regiones?
+
+Ahora utilizaremos la tabla `ventas_mensuales` de la sección 1.5. Un gráfico de líneas permite observar la evolución de una variable numérica a través de fechas. Cada color representa una región.
+
+```{r}
+#| label: grafico-montos-mensuales
+#| fig-width: 10
+#| fig-height: 5.5
+
+ggplot(ventas_mensuales,
+       aes(x = mes, y = monto_total, color = region, group = region)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.5) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %Y") +
+  scale_y_continuous(labels = scales::label_number(big.mark = ",", prefix = "$")) +
+  labs(
+    title = "Monto mensual de pedidos completados por región",
+    subtitle = "Enero de 2025 a diciembre de 2026",
+    x = "Mes",
+    y = "Monto total simulado",
+    color = "Región",
+    caption = "Fuente: datos sintéticos generados en R"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**¿Cómo se interpreta?** Cada punto corresponde al monto de una región en un mes. Una línea ascendente indica un aumento respecto al punto anterior; una descendente, una disminución. **Precaución:** las ventas se generaron de manera aleatoria, por lo que las variaciones no prueban que exista una tendencia comercial real.
+
+### Gráfico 3. ¿En qué meses aumentó o disminuyó el monto?
+
+Para visualizar el indicador MoM (%) calculado en la sección 1.6, mostraremos las variaciones mensuales en barras. Separaremos los paneles por región para que la comparación sea legible. La línea horizontal en cero ayuda a distinguir aumentos de disminuciones.
+
+```{r}
+#| label: grafico-crecimiento-mensual
+#| fig-width: 10
+#| fig-height: 8
+
+analisis_crecimiento_mensual |>
+  filter(!is.na(crecimiento_mensual_pct)) |>
+  ggplot(aes(x = mes, y = crecimiento_mensual_pct,
+             fill = crecimiento_mensual_pct >= 0)) +
+  geom_col(width = 24) +
+  geom_hline(yintercept = 0, color = "gray35") +
+  facet_wrap(~region, ncol = 2) +
+  scale_fill_manual(values = c("TRUE" = "#397B91", "FALSE" = "#BA6654"),
+                    guide = "none") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
+  labs(
+    title = "Variación mensual del monto por región (MoM %)",
+    subtitle = "Por encima de cero: aumento; por debajo de cero: disminución",
+    x = "Mes",
+    y = "Crecimiento mensual (%)",
+    caption = "Fuente: datos sintéticos generados en R"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**¿Cómo se interpreta?** Una barra positiva significa que el monto del mes fue mayor que el del mes anterior para esa misma región. Una barra negativa indica una caída. No aparece una barra para el primer mes de cada región, porque no tenemos un período anterior con el que compararlo.
+
+::: callout-note
+## Tres ideas para recordar
+
+`geom_bar()` cuenta registros de categorías, `geom_line()` une valores ordenados por fecha y `geom_col()` dibuja barras con alturas que ya calculamos. En todos los casos, `labs()` define títulos y nombres de ejes, mientras que `theme_minimal()` modifica la presentación del gráfico.
+:::
+
+## 1.8 Comprobar que el análisis tiene sentido
+
+**Propósito:** verificar que el resumen no haya perdido ni sumado montos por error. Comparamos el total de pedidos completados en la tabla transformada con la suma de los grupos mensuales.
+
+```{r}
+#| label: verificar-resultados
+
+# Confirmar el tamaño de la base simulada
+stopifnot(nrow(datos_ventas) == 50000, ncol(datos_ventas) == 12)
+
+# Comparar el total original de pedidos completados con el resumen
+total_directo <- datos_limpios |>
+  filter(estado_pedido == "Completado") |>
+  summarise(total = sum(monto_venta_numerico, na.rm = TRUE)) |>
+  pull(total)
+
+total_resumido <- sum(ventas_mensuales$monto_total)
+
+comparacion <- tibble(
+  calculo = c("Directo", "Agrupado por mes y región"),
+  monto = c(total_directo, total_resumido)
+)
+
+comparacion
+
+# Comprobar que coinciden, admitiendo diferencias mínimas de redondeo
+isTRUE(all.equal(total_directo, total_resumido))
+```
+
+La última instrucción debería devolver `TRUE`. Si devuelve `FALSE`, habría que revisar el filtrado, la conversión de montos y la agregación antes de interpretar los resultados.
+
+**Al terminar:** ya tienes tres objetos que seguiremos utilizando: `datos_ventas` (tabla simulada), `datos_limpios` (columnas preparadas) y `analisis_crecimiento_mensual` (comparación mensual). En la siguiente sección continuaremos con nuevas herramientas de R para explorar y comprender los datos.
+
+## Referencias
+
+::: {#refs}
+:::
